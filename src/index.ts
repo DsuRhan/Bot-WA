@@ -1,10 +1,13 @@
 import makeWASocket, {
   DisconnectReason,
   downloadMediaMessage,
+  generateWAMessageFromContent,
   jidNormalizedUser,
   normalizeMessageContent,
+  prepareWAMessageMedia,
+  proto,
   useMultiFileAuthState,
-} from '@whiskeysockets/baileys';
+} from '@rexxhayanasi/elaina-baileys';
 import 'dotenv/config';
 import pino from 'pino';
 import qrcode from 'qrcode-terminal';
@@ -14,6 +17,17 @@ const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
 const triggerCaption = (process.env.TRIGGER_CAPTION || '!sticker').trim().toLowerCase();
 const maxVideoBytes = Number(process.env.MAX_VIDEO_BYTES || 16 * 1024 * 1024);
 const authDirectory = 'auth_info';
+
+interface ConnectionUpdate {
+  connection?: string;
+  lastDisconnect?: { error?: unknown } | null;
+  qr?: string;
+}
+
+interface MessagesUpsert {
+  messages: proto.IWebMessageInfo[];
+  type: string;
+}
 
 if (!triggerCaption) {
   throw new Error('TRIGGER_CAPTION must not be empty.');
@@ -32,7 +46,7 @@ async function startBot(): Promise<void> {
   });
 
   socket.ev.on('creds.update', saveCreds);
-  socket.ev.on('connection.update', ({ connection, lastDisconnect, qr }) => {
+  socket.ev.on('connection.update', ({ connection, lastDisconnect, qr }: ConnectionUpdate) => {
     if (qr) {
       logger.info('Scan this QR code with the WhatsApp account that will run the bot:');
       qrcode.generate(qr, { small: true });
@@ -58,14 +72,22 @@ async function startBot(): Promise<void> {
     }
   });
 
-  socket.ev.on('messages.upsert', async ({ messages, type }) => {
+  socket.ev.on('messages.upsert', async ({ messages, type }: MessagesUpsert) => {
     if (type !== 'notify') return;
 
     for (const message of messages) {
-      const remoteJid = message.key.remoteJid;
-      const ownJid = socket.user?.id;
-      if (!message.key.fromMe || !remoteJid || !ownJid) continue;
-      if (jidNormalizedUser(remoteJid) !== jidNormalizedUser(ownJid)) continue;
+      const key = message.key;
+      const remoteJid = key?.remoteJid;
+      if (!key?.fromMe || !remoteJid) continue;
+
+      const ownJids = [
+        socket.user?.id,
+        state.creds.me?.id,
+        state.creds.me?.lid,
+      ]
+        .filter((jid): jid is string => Boolean(jid))
+        .map(jidNormalizedUser);
+      if (!ownJids.includes(jidNormalizedUser(remoteJid))) continue;
 
       const content = normalizeMessageContent(message.message);
       const video = content?.videoMessage;
@@ -86,11 +108,46 @@ async function startBot(): Promise<void> {
         }
 
         const { sticker, audio } = await makeStickerAndAudio(downloaded);
-        await socket.sendMessage(remoteJid, { sticker, mimetype: 'image/webp' });
-        await socket.sendMessage(remoteJid, {
-          audio,
-          mimetype: 'audio/ogg; codecs=opus',
-          ptt: true,
+        const stickerMedia = await prepareWAMessageMedia(
+          { sticker },
+          { upload: socket.waUploadToServer },
+        );
+        const audioMedia = await prepareWAMessageMedia(
+          { audio, mimetype: 'audio/ogg; codecs=opus' },
+          { upload: socket.waUploadToServer },
+        );
+        if (!stickerMedia.stickerMessage || !audioMedia.audioMessage || !socket.user?.id) {
+          throw new Error('WhatsApp did not prepare the sticker and audio media.');
+        }
+
+        const voicedSticker = generateWAMessageFromContent(
+          remoteJid,
+          {
+            audioStickerMessage: {
+              message: {
+                stickerMessage: {
+                  ...stickerMedia.stickerMessage,
+                  isAnimated: true,
+                  audioMessage: audioMedia.audioMessage,
+                },
+              },
+            },
+          },
+          { userJid: socket.user.id },
+        );
+        const messageId = voicedSticker.key?.id;
+        if (!messageId) {
+          throw new Error('WhatsApp did not generate an ID for the voiced sticker.');
+        }
+        await socket.relayMessage(remoteJid, voicedSticker.message, {
+          messageId,
+          participant: undefined,
+          additionalAttributes: undefined,
+          additionalNodes: undefined,
+          useUserDevicesCache: undefined,
+          useCachedGroupMetadata: undefined,
+          addBizAttributes: undefined,
+          statusJidList: undefined,
         });
       } catch (error) {
         logger.error({ err: error }, 'Could not convert the video.');

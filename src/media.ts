@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const MAX_STICKER_BYTES = 500 * 1024;
-const MAX_VIDEO_SECONDS = 10;
+const MAX_VIDEO_SECONDS = 60;
 
 interface ProcessResult {
   stdout: string;

@@ -2,7 +2,7 @@
 
 This bot watches only videos that you send **from the paired account to its own WhatsApp number**. Add the configured caption (default: `!sticker`) to a video to convert it.
 
-WhatsApp animated stickers do not support audio. The bot therefore sends two messages: an animated WebP sticker and the video's audio as a separate voice note.
+The bot sends an animated WebP sticker with its audio attached as one `audioStickerMessage`, using the Elaina Baileys fork's extended WhatsApp message schema. This is a nonstandard/experimental message type and may not render as a voiced sticker on every WhatsApp client.
 
 ## Requirements
 
