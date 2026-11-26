@@ -6,17 +6,19 @@ import makeWASocket, {
   normalizeMessageContent,
   prepareWAMessageMedia,
   proto,
-  useMultiFileAuthState,
+  useSingleFileAuthState,
 } from '@rexxhayanasi/elaina-baileys';
 import 'dotenv/config';
 import pino from 'pino';
 import qrcode from 'qrcode-terminal';
+import { migrateLegacyAuthState } from './auth-state.js';
 import { makeStickerAndAudio } from './media.js';
 
-const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
+const logger = pino({ level: process.env.LOG_LEVEL || 'warn' });
 const triggerCaption = (process.env.TRIGGER_CAPTION || '!sticker').trim().toLowerCase();
 const maxVideoBytes = Number(process.env.MAX_VIDEO_BYTES || 16 * 1024 * 1024);
-const authDirectory = 'auth_info';
+const authFile = 'auth_info.json';
+const legacyAuthDirectory = 'auth_info';
 
 interface ConnectionUpdate {
   connection?: string;
@@ -37,7 +39,15 @@ if (!Number.isSafeInteger(maxVideoBytes) || maxVideoBytes <= 0) {
 }
 
 async function startBot(): Promise<void> {
-  const { state, saveCreds } = await useMultiFileAuthState(authDirectory);
+  const migratedKeys = await migrateLegacyAuthState(authFile, legacyAuthDirectory);
+  if (migratedKeys !== null) {
+    logger.warn(
+      { migratedKeys, legacyAuthDirectory },
+      'Migrated the existing multi-file WhatsApp session; old files were left untouched.',
+    );
+  }
+
+  const { state, saveCreds } = await useSingleFileAuthState(authFile);
   const socket = makeWASocket({
     auth: state,
     logger,

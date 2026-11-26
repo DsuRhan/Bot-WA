@@ -87,8 +87,8 @@ export async function makeStickerAndAudio(video: Uint8Array): Promise<{
     await run(ffmpegPath(), [
       '-y', '-i', inputPath,
       '-map', '0:a:0', '-vn', '-t', String(MAX_VIDEO_SECONDS),
-      '-c:a', 'libopus', '-b:a', '64k', '-ac', '1', '-ar', '48000',
-      '-application', 'voip', audioPath,
+      '-c:a', 'libopus', '-b:a', '48k', '-ar', '48000',
+      '-application', 'audio', '-f', 'ogg', audioPath,
     ]);
 
     const encodings = [
