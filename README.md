@@ -7,7 +7,7 @@ The bot sends an animated WebP sticker with its audio attached as one `audioStic
 ## Requirements
 
 - Node.js 20 or newer
-- FFmpeg and FFprobe available on `PATH` (FFmpeg must include the `libwebp_anim` and `libopus` encoders)
+- `ffprobe` available on `PATH` or configured with `FFPROBE_PATH`; `ffmpeg-static` supplies FFmpeg on supported platforms (its binary must include the `libwebp_anim` and `libopus` encoders)
 - A WhatsApp account to pair with the bot
 
 ## Setup
@@ -22,6 +22,6 @@ Scan the QR code printed in the terminal with the WhatsApp account that should r
 
 Set `TRIGGER_CAPTION` in `.env` to change the exact caption required. Matching ignores letter case and surrounding whitespace. `MAX_VIDEO_BYTES` sets the maximum video download size; videos must also be no longer than 60 seconds and the animated sticker must fit WhatsApp's 500 KiB limit.
 
-Audio is encoded as Ogg Opus at 48 kHz and 48 kb/s to match the working audio-sticker example. Baileys logs default to warnings and errors; set `LOG_LEVEL` in `.env` to adjust verbosity.
+Audio is resampled to mono 48 kHz, timestamp-reset, and encoded as Ogg Opus at 48 kb/s to normalize differing source audio formats. Baileys logs default to warnings and errors; set `LOG_LEVEL` in `.env` to adjust verbosity.
 
-If FFmpeg is not on `PATH`, set `FFMPEG_PATH` and `FFPROBE_PATH` in `.env` to the executable paths.
+If the bundled FFmpeg binary is unavailable or incompatible with your platform, set `FFMPEG_PATH` in `.env` to a compatible executable. Set `FFPROBE_PATH` if `ffprobe` is not on `PATH`.

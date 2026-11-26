@@ -1,7 +1,11 @@
 import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+const ffmpegStaticModule: unknown = createRequire(import.meta.url)('ffmpeg-static');
+const bundledFFmpegPath = typeof ffmpegStaticModule === 'string' ? ffmpegStaticModule : null;
 
 const MAX_STICKER_BYTES = 500 * 1024;
 const MAX_VIDEO_SECONDS = 60;
@@ -40,7 +44,11 @@ function run(command: string, args: string[]): Promise<ProcessResult> {
 }
 
 function ffmpegPath(): string {
-  return process.env.FFMPEG_PATH || 'ffmpeg';
+  const path = process.env.FFMPEG_PATH || bundledFFmpegPath;
+  if (!path) {
+    throw new Error('No bundled FFmpeg binary is available for this platform; set FFMPEG_PATH.');
+  }
+  return path;
 }
 
 function ffprobePath(): string {
@@ -86,8 +94,9 @@ export async function makeStickerAndAudio(video: Uint8Array): Promise<{
 
     await run(ffmpegPath(), [
       '-y', '-i', inputPath,
-      '-map', '0:a:0', '-vn', '-t', String(MAX_VIDEO_SECONDS),
-      '-c:a', 'libopus', '-b:a', '48k', '-ar', '48000',
+      '-map', '0:a:0', '-vn', '-sn', '-dn', '-t', String(MAX_VIDEO_SECONDS),
+      '-af', 'aresample=48000:async=1:first_pts=0,asetpts=PTS-STARTPTS',
+      '-c:a', 'libopus', '-b:a', '48k', '-ar', '48000', '-ac', '1',
       '-application', 'audio', '-f', 'ogg', audioPath,
     ]);
 
