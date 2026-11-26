@@ -8,7 +8,7 @@ const ffmpegStaticModule: unknown = createRequire(import.meta.url)('ffmpeg-stati
 const bundledFFmpegPath = typeof ffmpegStaticModule === 'string' ? ffmpegStaticModule : null;
 
 const MAX_STICKER_BYTES = 500 * 1024;
-const MAX_VIDEO_SECONDS = 60;
+const MAX_VIDEO_SECONDS = 10;
 
 interface ProcessResult {
   stdout: string;
