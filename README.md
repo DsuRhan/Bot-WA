@@ -1,8 +1,8 @@
 # WhatsApp video sticker bot
 
-This bot converts videos sent to the paired account, as well as videos you send from that account to its own number. Add the configured caption (default: `!sticker`) to a video to convert it. For videos received in a group chat, the bot privately sends the result to the sender.
+This bot converts media sent to the paired account, as well as media you send from that account to its own number. Use the caption `!sticker` on an image for a still sticker, `!gif` on a video for an animated sticker without audio, or `!voiced` on a video for an animated sticker with its audio attached. For media received in a group chat, the bot privately sends the result to the sender.
 
-The bot sends an animated WebP sticker with its audio attached as one `audioStickerMessage`, using the Elaina Baileys fork's extended WhatsApp message schema. This is a nonstandard/experimental message type and may not render as a voiced sticker on every WhatsApp client.
+For `!voiced`, the bot attaches the video's audio to an animated WebP sticker in one `audioStickerMessage`, using the Elaina Baileys fork's extended WhatsApp message schema. This is a nonstandard/experimental message type and may not render as a voiced sticker on every WhatsApp client.
 
 ## Requirements
 
@@ -20,7 +20,7 @@ npm run dev
 
 Scan the QR code printed in the terminal with the WhatsApp account that should run the bot. Its login credentials and keys are stored in the single `auth_info.json` file; keep it private and do not share it. Existing `auth_info/` multi-file sessions are migrated automatically on first startup, and the old files are left untouched. After the first pairing, start with `npm start` (after `npm run build`) and the saved session will be reused.
 
-Set `TRIGGER_CAPTION` in `.env` to change the exact caption required. Matching ignores letter case and surrounding whitespace. `MAX_VIDEO_BYTES` sets the maximum video download size. For videos longer than 10 seconds, the bot uses only the first 10 seconds to create the animated sticker and its audio. The sticker preserves the video's aspect ratio, scales within a 512 × 512-pixel bounding box, and must fit WhatsApp's 500 KiB limit.
+Matching ignores letter case and surrounding whitespace. `MAX_VIDEO_BYTES` sets the maximum downloaded media size. For videos longer than 10 seconds, the bot uses only the first 10 seconds to create the animated sticker and, for `!voiced`, its audio. Stickers preserve the source aspect ratio, scale within a 512 × 512-pixel bounding box, and must fit WhatsApp's 500 KiB limit.
 
 Audio is resampled to mono 48 kHz, timestamp-reset, and encoded as Ogg Opus at 48 kb/s to normalize differing source audio formats. Baileys logs default to warnings and errors; set `LOG_LEVEL` in `.env` to adjust verbosity.
 

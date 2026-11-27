@@ -12,10 +12,9 @@ import 'dotenv/config';
 import pino from 'pino';
 import qrcode from 'qrcode-terminal';
 import { migrateLegacyAuthState } from './auth-state.js';
-import { makeStickerAndAudio } from './media.js';
+import { makeAnimatedSticker, makeStickerAndAudio, makeStillSticker } from './media.js';
 
 const logger = pino({ level: process.env.LOG_LEVEL || 'warn' });
-const triggerCaption = (process.env.TRIGGER_CAPTION || '!sticker').trim().toLowerCase();
 const maxVideoBytes = Number(process.env.MAX_VIDEO_BYTES || 16 * 1024 * 1024);
 const authFile = 'auth_info.json';
 const legacyAuthDirectory = 'auth_info';
@@ -31,9 +30,6 @@ interface MessagesUpsert {
   type: string;
 }
 
-if (!triggerCaption) {
-  throw new Error('TRIGGER_CAPTION must not be empty.');
-}
 if (!Number.isSafeInteger(maxVideoBytes) || maxVideoBytes <= 0) {
   throw new Error('MAX_VIDEO_BYTES must be a positive safe integer.');
 }
@@ -63,7 +59,7 @@ async function startBot(): Promise<void> {
     }
 
     if (connection === 'open') {
-      logger.info('Connected. Send a video with the configured caption to this account or its own number.');
+      logger.info('Connected. Use !sticker with an image, !gif with a video, or !voiced with a video.');
     }
 
     if (connection === 'close') {
@@ -103,7 +99,20 @@ async function startBot(): Promise<void> {
 
       const content = normalizeMessageContent(message.message);
       const video = content?.videoMessage;
-      if (!video || video.caption?.trim().toLowerCase() !== triggerCaption) continue;
+      const image = content?.imageMessage;
+      if (!video && !image) continue;
+
+      const caption = (video?.caption ?? image?.caption)?.trim().toLowerCase();
+      const mode = video
+        ? caption === '!gif'
+          ? 'animated'
+          : caption === '!voiced'
+            ? 'voiced'
+            : undefined
+        : caption === '!sticker'
+          ? 'still'
+          : undefined;
+      if (!mode) continue;
 
       const isGroupChat = remoteJid.endsWith('@g.us');
       const recipientJid = isSelfChat
@@ -117,9 +126,9 @@ async function startBot(): Promise<void> {
       }
 
       try {
-        const reportedSize = Number(video.fileLength);
+        const reportedSize = Number(video?.fileLength ?? image?.fileLength);
         if (Number.isFinite(reportedSize) && reportedSize > maxVideoBytes) {
-          throw new Error(`Video exceeds the configured ${maxVideoBytes}-byte download limit.`);
+          throw new Error(`Media exceeds the configured ${maxVideoBytes}-byte download limit.`);
         }
 
         const downloaded = await downloadMediaMessage(message, 'buffer', {}, {
@@ -127,42 +136,71 @@ async function startBot(): Promise<void> {
           reuploadRequest: socket.updateMediaMessage,
         });
         if (downloaded.byteLength > maxVideoBytes) {
-          throw new Error(`Video exceeds the configured ${maxVideoBytes}-byte download limit.`);
+          throw new Error(`Media exceeds the configured ${maxVideoBytes}-byte download limit.`);
         }
 
-        const { sticker, audio } = await makeStickerAndAudio(downloaded);
+        let sticker: Buffer;
+        let audio: Buffer | undefined;
+        if (mode === 'voiced') {
+          ({ sticker, audio } = await makeStickerAndAudio(downloaded));
+        } else if (mode === 'animated') {
+          sticker = await makeAnimatedSticker(downloaded);
+        } else {
+          sticker = await makeStillSticker(downloaded);
+        }
+
         const stickerMedia = await prepareWAMessageMedia(
           { sticker },
           { upload: socket.waUploadToServer },
         );
-        const audioMedia = await prepareWAMessageMedia(
-          { audio, mimetype: 'audio/ogg; codecs=opus' },
-          { upload: socket.waUploadToServer },
-        );
-        if (!stickerMedia.stickerMessage || !audioMedia.audioMessage || !socket.user?.id) {
-          throw new Error('WhatsApp did not prepare the sticker and audio media.');
+        if (!stickerMedia.stickerMessage || !socket.user?.id) {
+          throw new Error('WhatsApp did not prepare the sticker media.');
         }
 
-        const voicedSticker = generateWAMessageFromContent(
-          recipientJid,
-          {
-            audioStickerMessage: {
-              message: {
-                stickerMessage: {
-                  ...stickerMedia.stickerMessage,
-                  isAnimated: true,
-                  audioMessage: audioMedia.audioMessage,
+        let outgoingMessage: proto.IWebMessageInfo;
+        if (mode === 'voiced') {
+          if (!audio) {
+            throw new Error('Audio was not prepared for the voiced sticker.');
+          }
+          const audioMedia = await prepareWAMessageMedia(
+            { audio, mimetype: 'audio/ogg; codecs=opus' },
+            { upload: socket.waUploadToServer },
+          );
+          if (!audioMedia.audioMessage) {
+            throw new Error('WhatsApp did not prepare the sticker audio.');
+          }
+          outgoingMessage = generateWAMessageFromContent(
+            recipientJid,
+            {
+              audioStickerMessage: {
+                message: {
+                  stickerMessage: {
+                    ...stickerMedia.stickerMessage,
+                    isAnimated: true,
+                    audioMessage: audioMedia.audioMessage,
+                  },
                 },
               },
             },
-          },
-          { userJid: socket.user.id },
-        );
-        const messageId = voicedSticker.key?.id;
-        if (!messageId) {
-          throw new Error('WhatsApp did not generate an ID for the voiced sticker.');
+            { userJid: socket.user.id },
+          );
+        } else {
+          outgoingMessage = generateWAMessageFromContent(
+            recipientJid,
+            {
+              stickerMessage: {
+                ...stickerMedia.stickerMessage,
+                isAnimated: mode === 'animated',
+              },
+            },
+            { userJid: socket.user.id },
+          );
         }
-        await socket.relayMessage(recipientJid, voicedSticker.message, {
+        const messageId = outgoingMessage.key?.id;
+        if (!messageId) {
+          throw new Error('WhatsApp did not generate an ID for the sticker.');
+        }
+        await socket.relayMessage(recipientJid, outgoingMessage.message, {
           messageId,
           participant: undefined,
           additionalAttributes: undefined,
@@ -173,7 +211,7 @@ async function startBot(): Promise<void> {
           statusJidList: undefined,
         });
       } catch (error) {
-        logger.error({ err: error }, 'Could not convert the video.');
+        logger.error({ err: error }, 'Could not convert the media.');
         await socket.sendMessage(recipientJid, {
           text: `Could not make the sticker: ${error instanceof Error ? error.message : 'Unexpected error.'}`,
         });
