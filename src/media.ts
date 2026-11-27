@@ -51,20 +51,6 @@ function ffmpegPath(): string {
   return path;
 }
 
-function ffprobePath(): string {
-  return process.env.FFPROBE_PATH || 'ffprobe';
-}
-
-async function probe(inputPath: string, args: string[]): Promise<string> {
-  const result = await run(ffprobePath(), [
-    '-v', 'error',
-    ...args,
-    '-of', 'default=noprint_wrappers=1:nokey=1',
-    inputPath,
-  ]);
-  return result.stdout.trim();
-}
-
 export async function makeStickerAndAudio(video: Uint8Array): Promise<{
   sticker: Buffer;
   audio: Buffer;
@@ -75,22 +61,6 @@ export async function makeStickerAndAudio(video: Uint8Array): Promise<{
 
   try {
     await writeFile(inputPath, video);
-
-    const duration = Number(await probe(inputPath, ['-show_entries', 'format=duration']));
-    if (!Number.isFinite(duration) || duration <= 0) {
-      throw new Error('Could not determine the video duration.');
-    }
-    if (duration > MAX_VIDEO_SECONDS) {
-      throw new Error(`Video is longer than ${MAX_VIDEO_SECONDS} seconds.`);
-    }
-
-    const audioStream = await probe(inputPath, [
-      '-select_streams', 'a:0',
-      '-show_entries', 'stream=codec_type',
-    ]);
-    if (!audioStream) {
-      throw new Error('The video does not contain an audio track.');
-    }
 
     await run(ffmpegPath(), [
       '-y', '-i', inputPath,
@@ -112,7 +82,6 @@ export async function makeStickerAndAudio(video: Uint8Array): Promise<{
       const filter = [
         `fps=${fps}`,
         `scale=${scale}:${scale}:force_original_aspect_ratio=decrease:flags=lanczos`,
-        'pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000',
         'setsar=1',
       ].join(',');
 

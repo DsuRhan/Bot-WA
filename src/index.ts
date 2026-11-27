@@ -63,7 +63,7 @@ async function startBot(): Promise<void> {
     }
 
     if (connection === 'open') {
-      logger.info('Connected. Send a video with the configured caption to your own number.');
+      logger.info('Connected. Send a video with the configured caption to this account or its own number.');
     }
 
     if (connection === 'close') {
@@ -88,7 +88,7 @@ async function startBot(): Promise<void> {
     for (const message of messages) {
       const key = message.key;
       const remoteJid = key?.remoteJid;
-      if (!key?.fromMe || !remoteJid) continue;
+      if (!key || !remoteJid || remoteJid === 'status@broadcast') continue;
 
       const ownJids = [
         socket.user?.id,
@@ -97,11 +97,24 @@ async function startBot(): Promise<void> {
       ]
         .filter((jid): jid is string => Boolean(jid))
         .map(jidNormalizedUser);
-      if (!ownJids.includes(jidNormalizedUser(remoteJid))) continue;
+      const isSelfChat = Boolean(key.fromMe)
+        && ownJids.includes(jidNormalizedUser(remoteJid));
+      if (key.fromMe && !isSelfChat) continue;
 
       const content = normalizeMessageContent(message.message);
       const video = content?.videoMessage;
       if (!video || video.caption?.trim().toLowerCase() !== triggerCaption) continue;
+
+      const isGroupChat = remoteJid.endsWith('@g.us');
+      const recipientJid = isSelfChat
+        ? remoteJid
+        : isGroupChat
+          ? key.participant
+          : remoteJid;
+      if (!recipientJid) {
+        logger.warn({ remoteJid }, 'Cannot privately reply to a group video without its sender ID.');
+        continue;
+      }
 
       try {
         const reportedSize = Number(video.fileLength);
@@ -131,7 +144,7 @@ async function startBot(): Promise<void> {
         }
 
         const voicedSticker = generateWAMessageFromContent(
-          remoteJid,
+          recipientJid,
           {
             audioStickerMessage: {
               message: {
@@ -149,7 +162,7 @@ async function startBot(): Promise<void> {
         if (!messageId) {
           throw new Error('WhatsApp did not generate an ID for the voiced sticker.');
         }
-        await socket.relayMessage(remoteJid, voicedSticker.message, {
+        await socket.relayMessage(recipientJid, voicedSticker.message, {
           messageId,
           participant: undefined,
           additionalAttributes: undefined,
@@ -161,7 +174,7 @@ async function startBot(): Promise<void> {
         });
       } catch (error) {
         logger.error({ err: error }, 'Could not convert the video.');
-        await socket.sendMessage(remoteJid, {
+        await socket.sendMessage(recipientJid, {
           text: `Could not make the sticker: ${error instanceof Error ? error.message : 'Unexpected error.'}`,
         });
       }
